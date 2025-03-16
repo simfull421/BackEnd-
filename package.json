@@ -1,0 +1,18 @@
+{
+  "name": "nods",
+  "version": "0.0.0",
+  "description": "nods",
+  "main": "server.js",
+  "type": "commonjs",
+  "author": {
+    "name": ""
+  },
+  "devDependencies": {
+    "eslint": "^8.21.0"
+  },
+  "eslintConfig": {},
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^4.21.2"
+  }
+}
