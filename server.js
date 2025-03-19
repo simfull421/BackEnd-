@@ -37,6 +37,22 @@ if (process.env.NODE_ENV === "production") {
 
 app.use(bodyParser.json());
 
+//0: 몽고 db 사용
+
+const mongoose = require('mongoose');
+
+const userSchema = new mongoose.Schema({
+    email: { type: String, required: true, unique: true },
+    passwordHash: { type: String, required: true },
+    name: { type: String },
+    profilePicture: { type: String },
+    bio: { type: String }
+});
+
+const User = mongoose.model('User', userSchema);
+module.exports = User;
+
+
 
 // **1. 로그인 API**
 app.post('/api/login', async (req, res) => {
@@ -258,6 +274,7 @@ app.post('/api/find-username', async (req, res) => {
 });
 
 // **9. 비밀번호 찾기 API**
+const crypto = require('crypto');
 app.post('/api/forgot-password', async (req, res) => {
     const { email } = req.body;
 
@@ -338,9 +355,10 @@ app.get('/api/profile/:id', async (req, res) => {
     }
 });
 
-// **12. IT기사 조회 API**  
+// **12. IT기사 조회 API**
 // (외부 API 또는 MongoDB에서 IT 기사를 가져오는 API)
 // 컴퓨터 소프트웨어 관련 뉴스 검색 API
+const axios = require('axios');
 app.get('/api/news', async (req, res) => {
     const query = '컴퓨터 소프트웨어';  // 검색할 키워드
     const display = 10;  // 가져올 뉴스 개수 (1~100)
@@ -350,8 +368,8 @@ app.get('/api/news', async (req, res) => {
     try {
         const response = await axios.get('https://openapi.naver.com/v1/search/news.json', {
             headers: {
-                'X-Naver-Client-Id': CLIENT_ID,
-                'X-Naver-Client-Secret': CLIENT_SECRET
+                'X-Naver-Client-Id': ZjPPosVXoOeA7jp524C8,
+                'X-Naver-Client-Secret': d4P80H8KrG
             },
             params: {
                 query,
@@ -367,6 +385,76 @@ app.get('/api/news', async (req, res) => {
         res.status(500).json({ error: 'API 호출 실패' });
     }
 });
+
+
+// 13 학습 진행도 모델
+const progressSchema = new mongoose.Schema({
+    userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+    totalLessons: { type: Number, required: true },
+    completedLessons: { type: Number, required: true },
+    incompleteLessons: { type: Number, required: true }
+});
+const Progress = mongoose.model('Progress', progressSchema);
+
+// 14 학습 예제 모델
+const exampleSchema = new mongoose.Schema({
+    topic: { type: String, required: true },
+    examples: [{ type: String }]
+});
+const Example = mongoose.model('Example', exampleSchema);
+
+// 📌 15 학습 진행도 조회 (GET /progress/:userId)
+app.get('/progress/:userId', async (req, res) => {
+    try {
+        const progress = await Progress.findOne({ userId: req.params.userId });
+        if (!progress) {
+            return res.status(404).json({ message: '학습 진행도를 찾을 수 없음' });
+        }
+        res.json(progress);
+    } catch (error) {
+        res.status(500).json({ message: '서버 오류', error });
+    }
+});
+
+// 📌 16 학습 진행도 기록 추가 또는 갱신 (POST /progress/:userId)
+app.post('/progress/:userId', async (req, res) => {
+    try {
+        const { totalLessons, completedLessons, incompleteLessons } = req.body;
+        let progress = await Progress.findOne({ userId: req.params.userId });
+
+        if (!progress) {
+            progress = new Progress({
+                userId: req.params.userId,
+                totalLessons,
+                completedLessons,
+                incompleteLessons
+            });
+        } else {
+            progress.totalLessons = totalLessons;
+            progress.completedLessons = completedLessons;
+            progress.incompleteLessons = incompleteLessons;
+        }
+
+        await progress.save();
+        res.json({ message: '학습 진행도 저장 완료', progress });
+    } catch (error) {
+        res.status(500).json({ message: '서버 오류', error });
+    }
+});
+
+// 📌17  학습 예제 조회 (GET /examples/:topic)
+app.get('/examples/:topic', async (req, res) => {
+    try {
+        const example = await Example.findOne({ topic: req.params.topic });
+        if (!example) {
+            return res.status(404).json({ message: '해당 주제의 예제가 없음' });
+        }
+        res.json(example);
+    } catch (error) {
+        res.status(500).json({ message: '서버 오류', error });
+    }
+});
+
 app.listen(3000, () => {
     console.log("Express server running on port 3000");
 });
