@@ -8,15 +8,18 @@ const bodyParser = require('body-parser');
 const jwt = require('jsonwebtoken');
 const nodemailer = require('nodemailer');
 const bcrypt = require('bcrypt');
-
+const session = require('express-session');
 const app = express();
 app.use(express.json());
 
 app.use(cors());  // 모든 도메인에서 접근 허용
-
-
-
-
+// 세션 설정
+app.use(session({
+    secret: 'your_secret_key', // 세션 암호화 키
+    resave: false,             // 세션이 변경되지 않더라도 계속 저장할지 여부
+    saveUninitialized: true,   // 초기화되지 않은 세션도 저장할지 여부
+    cookie: { secure: false }  // HTTPOnly 및 Secure 설정 (여기서는 개발 환경이라 false)
+}));
 
 const router = express.Router();
 // dialogflow
@@ -26,55 +29,16 @@ app.use(bodyParser.json());
 app.use('/api/dialogflow', require('./dialogflow'));
 
 if (process.env.NODE_ENV === "production") {
-
     app.use(express.static("client/build"));
-
     app.get("*", (req, res) => {
         res.sendFile(path.resolve(__dirname, "client", "build", "index.html"));
     });
 }
 
-
-
 app.use(bodyParser.json());
 
-// 로그인 API
 
-
-
-
-// JWT 인증 미들웨어
-/*const authenticateJWT = (req, res, next) => {
-    // googleId가 요청 본문에 있으면 JWT 인증을 건너뛰고 바로 진행
-    if (req.body.googleId) {
-        return next();  // 구글 로그인인 경우 인증을 건너뛰고 다음 미들웨어로 넘어감
-    }
-
-    // Authorization 헤더에서 토큰 추출 (Bearer <token> 형태)
-    const token = req.header('Authorization')?.split(' ')[1]; // Bearer <token>
-
-    if (!token) {
-        return res.status(401).json({ error: '인증이 필요합니다.' });
-    }
-
-    // JWT 토큰 검증
-    jwt.verify(token, process.env.JWT_SECRET, (err, user) => {
-        if (err) {
-            return res.status(403).json({ error: '유효하지 않은 토큰입니다.' });
-        }
-
-        // 사용자 정보 저장 (다음 라우트에서 사용 가능)
-        req.user = user; // 인증된 사용자 정보 저장
-        next(); // 다음 미들웨어로 진행
-    });
-};
-*/
-// 보호된 API 엔드포인트
-/*app.get('/api/protected', authenticateJWT, (req, res) => {
-    res.json({ message: '보호된 정보', user: req.user }); // 인증된 사용자 정보 반환
-});*/
-
-// **로그인 API (MongoDB + Mongoose)**
+// **1. 로그인 API**
 app.post('/api/login', async (req, res) => {
     const { email, password } = req.body;
 
@@ -87,15 +51,11 @@ app.post('/api/login', async (req, res) => {
         if (email === 'admin' && password === '1234') {
             console.log('관리자 계정으로 로그인되었습니다.');
 
-            // 관리자 토큰 생성
-            const authToken = jwt.sign(
-                { id: 'admin', email: 'admin', isAdmin: true },
-                process.env.JWT_SECRET,
-                { expiresIn: '1h' }
-            );
+            // 관리자 세션 저장
+            req.session.user = { id: 'admin', email: 'admin', isAdmin: true };
 
             return res.status(200).json({
-                authToken,
+                message: '관리자 계정으로 로그인되었습니다.',
                 userId: 'admin',
                 isAdmin: true
             });
@@ -120,15 +80,11 @@ app.post('/api/login', async (req, res) => {
             return res.status(401).json({ error: '아이디 또는 비밀번호가 잘못되었습니다.' });
         }
 
-        // **JWT 토큰 생성**
-        const authToken = jwt.sign(
-            { id: user._id, email: user.email, isAdmin: false },
-            process.env.JWT_SECRET,
-            { expiresIn: '1h' }
-        );
+        // **세션에 사용자 정보 저장**
+        req.session.user = { id: user._id, email: user.email, isAdmin: false };
 
         return res.status(200).json({
-            authToken,
+            message: '로그인 성공',
             userId: user._id,
             isAdmin: false
         });
@@ -139,59 +95,31 @@ app.post('/api/login', async (req, res) => {
     }
 });
 
+// **2. 로그아웃 API**
+app.post('/api/logout', (req, res) => {
+    req.session.destroy((err) => {
+        if (err) {
+            return res.status(500).json({ message: '로그아웃 중 오류가 발생했습니다.' });
+        }
+        res.status(200).json({ message: '로그아웃 성공' });
+    });
+});
 
 
-
-
-/*import mongoose from 'mongoose';
-
-// MongoDB 연결 URI (환경변수 사용 추천)
-const dbURI = 'mongodb://localhost:27017/mydatabase'; // 데이터베이스 이름 변경 가능
-
-// MongoDB 연결
-mongoose.connect(dbURI)
-    .then(() => {
-        console.log('데이터베이스 연결 성공');
-        createCollections(); // 필요한 컬렉션(스키마) 생성
-        fetchUserData();
-        // insertTestData(); // 필요 시 주석 해제
-    })
-    .catch(err => console.error('데이터베이스 연결 실패:', err.message));
-
-// 스키마 및 모델 정의
-const userSchema = new mongoose.Schema({
-    name: String,
-    email: String,
-    age: Number
-}, { collection: 'users' });
-
-const User = mongoose.model('User', userSchema);
-
-export { User }; // 다른 파일에서 import할 수 있도록 export 추가
-*/
-
-
-
-
-
-
-
-// 인증 코드를 저장할 객체
+// **3. 인증 코드 생성 및 이메일 발송**
 const verificationCodes = {};
 
-// 인증 코드 생성 함수
 const generateVerificationCode = () => {
-    const characters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'; // 사용할 문자 집합
+    const characters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
     let code = '';
     for (let i = 0; i < 6; i++) {
         const randomIndex = Math.floor(Math.random() * characters.length);
-        code += characters[randomIndex]; // 랜덤으로 문자 추가
+        code += characters[randomIndex];
     }
-    return code; // 생성된 인증 코드 반환
+    return code;
 };
 
 // Nodemailer transporter 설정
-
 const transporter = nodemailer.createTransport({
     service: 'gmail',
     auth: {
@@ -200,15 +128,9 @@ const transporter = nodemailer.createTransport({
     },
 });
 
-module.exports = { generateVerificationCode, transporter, verificationCodes };
-
-
-
-// 인증 이메일 발송 라우트
+// **4. 인증 이메일 발송 API**
 app.post('/api/send-verification-email', (req, res) => {
-    console.log(req.body); // 요청 본문 로그 확인 (디버깅용)
-
-    const { email } = req.body; // 이메일 추출
+    const { email } = req.body;
 
     // 이메일 유효성 검사
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -236,15 +158,9 @@ app.post('/api/send-verification-email', (req, res) => {
 });
 
 
-
-
-// 인증 코드 검증 라우트
+// **5. 인증 코드 검증 API**
 app.post('/api/verify-code', (req, res) => {
     const { email, code } = req.body;
-
-    console.log('Received email:', email); // 수신된 이메일 로그
-    console.log('Received code:', code); // 수신된 인증 코드 로그
-    console.log('Stored code:', verificationCodes[email]); // 저장된 인증 코드 로그
 
     // 입력된 이메일에 대한 인증 코드 검증
     if (verificationCodes[email] && verificationCodes[email] === code) {
@@ -256,9 +172,7 @@ app.post('/api/verify-code', (req, res) => {
 });
 
 
-
-
-// **회원가입 API (MongoDB + Mongoose)**
+// **6. 회원가입 API**
 app.post('/api/register', async (req, res) => {
     const { email, password } = req.body;
 
@@ -287,8 +201,172 @@ app.post('/api/register', async (req, res) => {
 });
 
 
+// **7. 세션 생성, 유효성, 무효화 API**  
+// **. 세션 유효성 검사 API**
+app.get('/api/session', (req, res) => {
+    if (req.session.user) {
+        res.status(200).json({
+            message: '세션 유효',
+            user: req.session.user
+        });
+    } else {
+        res.status(401).json({ message: '로그인 상태가 아닙니다.' });
+    }
+});
+
+// **. 로그아웃 및 세션 무효화 API**
+app.post('/api/logout', (req, res) => {
+    req.session.destroy((err) => {
+        if (err) {
+            return res.status(500).json({ message: '로그아웃 중 오류가 발생했습니다.' });
+        }
+        res.status(200).json({ message: '로그아웃 성공' });
+    });
+});
+
+// **8. 아이디 찾기 API**  
+// (이메일로 사용자 정보를 찾아 해당 이메일로 아이디를 발송하는 API)
+app.post('/api/find-username', async (req, res) => {
+    const { email } = req.body;
+
+    try {
+        // 이메일로 사용자 정보 찾기
+        const user = await User.findOne({ email });
+
+        if (!user) {
+            return res.status(404).json({ error: '해당 이메일로 등록된 사용자가 없습니다.' });
+        }
+
+        // 이메일로 아이디 전송
+        const mailOptions = {
+            from: 'your-email@gmail.com',  // 보낸 사람 이메일
+            to: email,  // 받는 사람 이메일
+            subject: '아이디 찾기',
+            text: `안녕하세요, ${user.email}님의 아이디는 ${user.email}입니다.`
+        };
+
+        transporter.sendMail(mailOptions, (error, info) => {
+            if (error) {
+                return res.status(500).json({ error: '이메일 전송 중 오류가 발생했습니다.' });
+            }
+            res.status(200).json({ message: '아이디가 이메일로 전송되었습니다.' });
+        });
+    } catch (error) {
+        console.error('아이디 찾기 오류:', error);
+        res.status(500).json({ error: '아이디 찾기 중 오류가 발생했습니다.' });
+    }
+});
+
+// **9. 비밀번호 찾기 API**
+app.post('/api/forgot-password', async (req, res) => {
+    const { email } = req.body;
+
+    try {
+        // 이메일로 사용자 찾기
+        const user = await User.findOne({ email });
+
+        if (!user) {
+            return res.status(404).json({ error: '해당 이메일로 등록된 사용자가 없습니다.' });
+        }
+
+        // 비밀번호 리셋을 위한 토큰 생성
+        const resetToken = crypto.randomBytes(20).toString('hex');
+        user.resetPasswordToken = resetToken;
+        user.resetPasswordExpires = Date.now() + 3600000;  // 1시간 후 만료
+
+        // MongoDB에 업데이트된 사용자 정보 저장
+        await user.save();
+
+        // 리셋 링크 이메일 전송
+        const resetLink = `http://localhost:3000/reset-password/${resetToken}`;
+
+        const mailOptions = {
+            from: 'your-email@gmail.com',
+            to: email,
+            subject: '비밀번호 재설정',
+            text: `안녕하세요, 비밀번호를 재설정하려면 아래 링크를 클릭하세요: \n\n ${resetLink}`
+        };
+
+        transporter.sendMail(mailOptions, (error, info) => {
+            if (error) {
+                return res.status(500).json({ error: '이메일 전송 중 오류가 발생했습니다.' });
+            }
+            res.status(200).json({ message: '비밀번호 리셋 링크가 이메일로 전송되었습니다.' });
+        });
+    } catch (error) {
+        console.error('비밀번호 찾기 오류:', error);
+        res.status(500).json({ error: '비밀번호 찾기 중 오류가 발생했습니다.' });
+    }
+});
 
 
+
+// **10. 사용자 조회 API**  
+app.get('/api/user/:id', async (req, res) => {
+    try {
+        const user = await User.findById(req.params.id);
+        if (!user) {
+            return res.status(404).json({ error: '사용자를 찾을 수 없습니다.' });
+        }
+        res.status(200).json(user);
+    } catch (error) {
+        res.status(500).json({ error: '사용자 조회 중 오류가 발생했습니다.' });
+    }
+});
+
+// **11. 프로필 조회 API**
+// (사용자의 프로필 정보를 조회하는 API)
+// **프로필 조회 API** (사용자의 프로필 정보만 반환)
+app.get('/api/profile/:id', async (req, res) => {
+    try {
+        const user = await User.findById(req.params.id);
+        if (!user) {
+            return res.status(404).json({ error: '사용자를 찾을 수 없습니다.' });
+        }
+
+        // 프로필에 필요한 정보만 반환 (예: 이름, 이메일, 프로필 사진, 자기소개 등)
+        const profileData = {
+            name: user.name,
+            email: user.email,
+            profilePicture: user.profilePicture,
+            bio: user.bio,
+        };
+
+        res.status(200).json(profileData);
+    } catch (error) {
+        res.status(500).json({ error: '프로필 조회 중 오류가 발생했습니다.' });
+    }
+});
+
+// **12. IT기사 조회 API**  
+// (외부 API 또는 MongoDB에서 IT 기사를 가져오는 API)
+// 컴퓨터 소프트웨어 관련 뉴스 검색 API
+app.get('/api/news', async (req, res) => {
+    const query = '컴퓨터 소프트웨어';  // 검색할 키워드
+    const display = 10;  // 가져올 뉴스 개수 (1~100)
+    const start = 1;  // 검색 시작 위치 (1~1000)
+    const sort = 'sim';  // 정렬 방식 ('sim' - 유사도순, 'date' - 날짜순)
+
+    try {
+        const response = await axios.get('https://openapi.naver.com/v1/search/news.json', {
+            headers: {
+                'X-Naver-Client-Id': CLIENT_ID,
+                'X-Naver-Client-Secret': CLIENT_SECRET
+            },
+            params: {
+                query,
+                display,
+                start,
+                sort
+            }
+        });
+
+        res.json(response.data);  // 네이버 API 응답을 클라이언트에게 전달
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ error: 'API 호출 실패' });
+    }
+});
 app.listen(3000, () => {
     console.log("Express server running on port 3000");
 });
