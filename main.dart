@@ -7,6 +7,8 @@ void main() {
 }
 
 class ChatApp extends StatelessWidget {
+  const ChatApp({super.key});
+
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
@@ -22,6 +24,8 @@ class ChatApp extends StatelessWidget {
 }
 
 class ChatScreen extends StatefulWidget {
+  const ChatScreen({super.key});
+
   @override
   _ChatScreenState createState() => _ChatScreenState();
 }
@@ -29,113 +33,178 @@ class ChatScreen extends StatefulWidget {
 class _ChatScreenState extends State<ChatScreen> {
   final TextEditingController _controller = TextEditingController();
   List<Map<String, String>> messages = [];
-  List newsArticles = [];  // ´º½º µ¥ÀÌÅÍ¸¦ ÀúÀåÇÒ º¯¼ö
+  List newsArticles = [];
+  final String userId = "user123"; // ì‚¬ìš©ì ID
+  bool isLoading = false; // ë‰´ìŠ¤ ë¡œë”© ìƒíƒœ í‘œì‹œìš©
+  @override
+  void initState() {
+    super.initState();
+    _fetchNews(); // ë‰´ìŠ¤ ë°ì´í„° ê°€ì ¸ì˜¤ê¸°
+  }
 
-  // ´º½º µ¥ÀÌÅÍ¸¦ °¡Á®¿À´Â ÇÔ¼ö
-  Future<void> _fetchNews() async {
-    final response = await http.get(Uri.parse('http://localhost:3000/api/news'));  // ¹é¿£µå API ¿äÃ»
-
-    if (response.statusCode == 200) {
-      final data = json.decode(response.body);
+  Future<void> _sendMessage() async {
+    if (_controller.text.isEmpty) return;
+    setState(() {
+      messages.add({"user": _controller.text});
+    });
+    try {
+      final response = await http.post(
+        Uri.parse('http://localhost:3000/chat'),
+        headers: {'Content-Type': 'application/json'},
+        body: json.encode({"message": _controller.text}),
+      );
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        setState(() {
+          messages.add({"bot": data['response']});
+        });
+      }
+    } catch (e) {
       setState(() {
-        newsArticles = data['items'];  // 'items'¿¡ ´º½º Á¤º¸°¡ µé¾îÀÖÀ½
+        messages.add({"bot": "ì˜¤ë¥˜ ë°œìƒ: $e"});
       });
-    } else {
+    }
+    _controller.clear();
+  }
+ Future<void> _fetchNews() async {
+    setState(() {
+      isLoading = true; // ë¡œë”© ì‹œì‘
+    });
+
+    try {
+      final response = await http.get(Uri.parse('http://localhost:3000/api/news'));
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        setState(() {
+          if (data is Map<String, dynamic> && data.containsKey('items') && data['items'] is List) {
+            newsArticles = data['items'].take(5).toList(); // 5ê°œë§Œ ê°€ì ¸ì˜¤ê¸°
+          } else {
+            newsArticles = [];
+          }
+        });
+      } else {
+        throw Exception('ë‰´ìŠ¤ ê°€ì ¸ì˜¤ê¸° ì‹¤íŒ¨');
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('ë‰´ìŠ¤ ê°€ì ¸ì˜¤ê¸° ì¤‘ ì˜¤ë¥˜ ë°œìƒ: $e')),
+        );
+      }
+    } finally {
       setState(() {
-        newsArticles = [];  // ½ÇÆĞ ½Ã ºó ¸®½ºÆ®·Î ÃÊ±âÈ­
+        isLoading = false; // ë¡œë”© ì™„ë£Œ
       });
     }
   }
 
-  // ÁøÇàµµ µ¥ÀÌÅÍ¸¦ °¡Á®¿À´Â API È£Ãâ (¿¹½Ã)
-  Future<double> _fetchLearningProgress() async {
-    final response = await http.get(Uri.parse('http://localhost:3000/api/progress'));  // ¹é¿£µå API ¿äÃ»
 
-    if (response.statusCode == 200) {
-      final data = json.decode(response.body);
-      return data['progress'];  // 'progress'¿¡ ÁøÇàµµ °ªÀÌ µé¾îÀÖÀ½
-    } else {
-      return 0.0;  // ½ÇÆĞ ½Ã 0%·Î ÃÊ±âÈ­
+  Future<void> _fetchLearningProgress() async {
+    try {
+      final response = await http.get(Uri.parse('http://localhost:3000/api/progress/$userId'));
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('í•™ìŠµ ì§„í–‰ë„: ${data['completedLessons']}/${data['totalLessons']}')),
+          );
+        }
+      } else {
+        throw Exception('í•™ìŠµ ì§„í–‰ë„ ê°€ì ¸ì˜¤ê¸° ì‹¤íŒ¨');
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('í•™ìŠµ ì§„í–‰ë„ ê°€ì ¸ì˜¤ê¸° ì¤‘ ì˜¤ë¥˜ ë°œìƒ: $e')),
+        );
+      }
+    }
+  }
+
+  Future<void> _fetchLearningExample(String topic) async {
+    try {
+      final response = await http.get(Uri.parse('http://localhost:3000/api/examples/$topic'));
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('ì˜ˆì‹œ: ${data['examples'].join(', ')}')),
+          );
+        }
+      } else {
+        throw Exception('í•™ìŠµ ì˜ˆì‹œ ê°€ì ¸ì˜¤ê¸° ì‹¤íŒ¨');
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('í•™ìŠµ ì˜ˆì‹œ ê°€ì ¸ì˜¤ê¸° ì¤‘ ì˜¤ë¥˜ ë°œìƒ: $e')),
+        );
+      }
+    }
+  }
+
+  Future<void> _saveLearningProgress(int total, int completed) async {
+    try {
+      final response = await http.post(
+        Uri.parse('http://localhost:3000/api/progress/$userId'),
+        headers: {'Content-Type': 'application/json'},
+        body: json.encode({
+          'totalLessons': total,
+          'completedLessons': completed,
+          'incompleteLessons': total - completed
+        }),
+      );
+      if (response.statusCode == 200) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('í•™ìŠµ ì§„í–‰ë„ ì €ì¥ ì™„ë£Œ')),
+          );
+        }
+      } else {
+        throw Exception('í•™ìŠµ ì§„í–‰ë„ ì €ì¥ ì‹¤íŒ¨');
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('í•™ìŠµ ì§„í–‰ë„ ì €ì¥ ì¤‘ ì˜¤ë¥˜ ë°œìƒ: $e')),
+        );
+      }
     }
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: Text('AI Ãªº¿')),
+      appBar: AppBar(title: Text('AI ì±—')),
       body: Column(
         children: [
-          // ´º½º ¹öÆ°
-          Padding(
-            padding: const EdgeInsets.all(8.0),
-            child: ElevatedButton(
-              onPressed: _fetchNews,
-              child: Text('´º½º °¡Á®¿À±â'),
-            ),
-          ),
-
-          // ÇĞ½À ÁøÇàµµ È®ÀÎ ¹öÆ°
-          Padding(
-            padding: const EdgeInsets.all(8.0),
-            child: ElevatedButton(
-              onPressed: () async {
-                double progress = await _fetchLearningProgress();
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(content: Text('ÇöÀç ÇĞ½À ÁøÇàµµ: $progress%')),
-                );
-              },
-              child: Text('ÇĞ½À ÁøÇàµµ È®ÀÎ'),
-            ),
-          ),
-
-          // ¸Ş½ÃÁö¿Í ´º½º Ç¥½Ã
+          // ë©”ì‹œì§€ ë¦¬ìŠ¤íŠ¸ í‘œì‹œ
           Expanded(
             child: ListView.builder(
-              itemCount: messages.length + newsArticles.length,  // ¸Ş½ÃÁö + ´º½º ±â»ç ¼ö
+              itemCount: messages.length,
               itemBuilder: (context, index) {
-                if (index < messages.length) {
-                  // ¸Ş½ÃÁö
-                  return ListTile(
-                    title: Text(
-                      messages[index]['message']!,
-                      style: TextStyle(
-                        fontFamily: 'NotoSans',  // NotoSans ±Û²Ã Àû¿ë
-                        color: messages[index]['who'] == 'user' ? Colors.blue : Colors.green,
-                      ),
+                final msg = messages[index];
+                final isUser = msg.containsKey("user");
+                return Align(
+                  alignment: isUser ? Alignment.centerRight : Alignment.centerLeft,
+                  child: Container(
+                    margin: EdgeInsets.symmetric(vertical: 5, horizontal: 10),
+                    padding: EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: isUser ? Colors.blue : Colors.grey,
+                      borderRadius: BorderRadius.circular(12),
                     ),
-                  );
-                } else {
-                  // ´º½º ±â»ç
-                  final article = newsArticles[index - messages.length];
-                  return Card(
-                    margin: EdgeInsets.all(8.0),
-                    elevation: 4.0,
-                    child: ListTile(
-                      contentPadding: EdgeInsets.all(16.0),
-                      title: Text(
-                        article['title'],
-                        style: TextStyle(fontWeight: FontWeight.bold),
-                      ),
-                      subtitle: Text(
-                        article['description'] ?? '¼³¸íÀÌ ¾ø½À´Ï´Ù.',
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                      onTap: () {
-                        // Å¬¸¯ ½Ã ´º½º ¿ø¹® ¸µÅ©·Î ÀÌµ¿ (¿ø¹® URLÀÌ ÀÖÀ» °æ¿ì)
-                        final url = article['url'];
-                        if (url != null) {
-                          // ¸µÅ© ¿­±â ·ÎÁ÷ Ãß°¡ °¡´É
-                          print('´º½º ¿ø¹® ¸µÅ©: $url');
-                        }
-                      },
+                    child: Text(
+                      isUser ? msg["user"]! : msg["bot"]!,
+                      style: TextStyle(color: Colors.white),
                     ),
-                  );
-                }
+                  ),
+                );
               },
             ),
           ),
-
+          
+          // í…ìŠ¤íŠ¸ ì…ë ¥ ì˜ì—­
           Padding(
             padding: const EdgeInsets.all(8.0),
             child: Row(
@@ -143,25 +212,58 @@ class _ChatScreenState extends State<ChatScreen> {
                 Expanded(
                   child: TextField(
                     controller: _controller,
-                    decoration: InputDecoration(labelText: '¸Ş½ÃÁö¸¦ ÀÔ·ÂÇÏ¼¼¿ä'),
-                    style: TextStyle(fontFamily: 'NotoSans'),  // ÅØ½ºÆ® ÀÔ·Â ½Ã ±Û²Ã Àû¿ë
+                    decoration: InputDecoration(
+                      labelText: 'ë©”ì‹œì§€ë¥¼ ì…ë ¥í•˜ì„¸ìš”',
+                      border: OutlineInputBorder(),
+                    ),
                   ),
                 ),
                 IconButton(
                   icon: Icon(Icons.send),
-                  onPressed: () {
-                    String text = _controller.text;
-                    if (text.isNotEmpty) {
-                      setState(() {
-                        messages.add({'who': 'user', 'message': text});
-                      });
-                      _controller.clear();
-                    }
-                  },
+                  onPressed: _sendMessage,
                 ),
               ],
             ),
           ),
+
+          // ë‰´ìŠ¤ ê°€ì ¸ì˜¤ê¸° ë²„íŠ¼ ì¶”ê°€
+          Padding(
+            padding: const EdgeInsets.all(8.0),
+            child: ElevatedButton(
+              onPressed: _fetchNews,
+              child: Text('ë‰´ìŠ¤ ê°€ì ¸ì˜¤ê¸°'),
+            ),
+          ),
+
+          // ë‰´ìŠ¤ ë¡œë”© ì¤‘ì¼ ë•Œ ë¡œë”© í‘œì‹œ
+          if (isLoading)
+            Padding(
+              padding: const EdgeInsets.all(8.0),
+              child: CircularProgressIndicator(),
+            ),
+
+          // ë‰´ìŠ¤ ë¦¬ìŠ¤íŠ¸ í‘œì‹œ
+          if (!isLoading && newsArticles.isNotEmpty)
+            Expanded(
+              child: ListView.builder(
+                itemCount: newsArticles.length,
+                itemBuilder: (context, index) {
+                  final article = newsArticles[index];
+                  final imageUrl = article['imageUrl']; // ì´ë¯¸ì§€ URL ê°€ì ¸ì˜¤ê¸° (APIì—ì„œ ì œê³µí•˜ëŠ” ê²½ìš°)
+                  return ListTile(
+                    leading: imageUrl != null
+                        ? Image.network(imageUrl, width: 50, height: 50, fit: BoxFit.cover)
+                        : null, // ì´ë¯¸ì§€ê°€ ìˆì„ ê²½ìš° ë³´ì—¬ì£¼ê¸°
+                    title: Text(article['title'] ?? 'ì œëª© ì—†ìŒ'),
+                    subtitle: Text(article['description'] ?? 'ì„¤ëª… ì—†ìŒ'),
+                  );
+                },
+              ),
+            ),
+          
+          // ë‰´ìŠ¤ê°€ ì—†ì„ ê²½ìš° ë©”ì‹œì§€ í‘œì‹œ
+          if (!isLoading && newsArticles.isEmpty)
+            Center(child: Text('ë‰´ìŠ¤ê°€ ì—†ìŠµë‹ˆë‹¤')),
         ],
       ),
     );
@@ -169,57 +271,49 @@ class _ChatScreenState extends State<ChatScreen> {
 }
 
 class LearningScreen extends StatelessWidget {
+  const LearningScreen({super.key});
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: Text("ÇĞ½À È­¸é")),
-      body: Column(
-        children: [
-          ElevatedButton(
-            onPressed: () {
-              Navigator.pushNamed(context, '/quiz');  // ÄûÁî ÆäÀÌÁö·Î ¸®´ÙÀÌ·º¼Ç
-            },
-            child: Text("ÇĞ½À ÄûÁî Ç®±â"),
-          ),
-          ElevatedButton(
-            onPressed: () {
-              // ÇĞ½À ¿¹Á¦ °¡Á®¿À±â ·ÎÁ÷
-              print("ÇĞ½À ¿¹Á¦ º¸¿©ÁÖ±â");
-            },
-            child: Text("ÇĞ½À ¿¹Á¦ º¸±â"),
-          ),
-        ],
-      ),
+      appBar: AppBar(title: Text("í•™ìŠµ ì§„í–‰")),
+      body: Center(child: Text("í•™ìŠµ ë‚´ìš©")),
     );
   }
 }
 
 class QuizScreen extends StatelessWidget {
+  const QuizScreen({super.key});
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: Text("ÄûÁî È­¸é")),
-      body: Center(child: Text("¿©±â¿¡ ÄûÁî ³»¿ëÀÌ Ç¥½ÃµË´Ï´Ù.")),
+      appBar: AppBar(title: Text("í€´ì¦ˆ ì§„í–‰")),
+      body: Center(child: Text("í€´ì¦ˆ ë‚´ìš©")),
     );
   }
 }
 
 class ITArticlesScreen extends StatelessWidget {
+  const ITArticlesScreen({super.key});
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: Text("IT ±â»ç È­¸é")),
-      body: Center(child: Text("¿©±â¿¡ IT ±â»ç°¡ Ç¥½ÃµË´Ï´Ù.")),
+      appBar: AppBar(title: Text("IT ê¸°ì‚¬")),
+      body: Center(child: Text("IT ê¸°ì‚¬ ë‚´ìš©")),
     );
   }
 }
 
 class CommunityScreen extends StatelessWidget {
+  const CommunityScreen({super.key});
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: Text("Ä¿¹Â´ÏÆ¼ È­¸é")),
-      body: Center(child: Text("¿©±â¿¡ Ä¿¹Â´ÏÆ¼ ³»¿ëÀÌ Ç¥½ÃµË´Ï´Ù.")),
+      appBar: AppBar(title: Text("ì»¤ë®¤ë‹ˆí‹°")),
+      body: Center(child: Text("ì»¤ë®¤ë‹ˆí‹° ë‚´ìš©")),
     );
   }
 }

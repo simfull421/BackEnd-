@@ -3,7 +3,7 @@ import 'package:http/http.dart' as http;
 
 class ChatbotService {
   // 서버 URL을 설정합니다. 서버는 로컬에서 실행 중일 때는 localhost 사용, 실제 배포 시에는 서버 주소로 변경
-  final String _baseUrl = 'http://localhost:3000/textQuery';
+  final String _baseUrl = 'http://localhost:3000/textQuery';  // 수정된 URL
 
   // 서버로 메시지를 보내는 함수
   Future<Map<String, dynamic>> sendMessage(String text) async {

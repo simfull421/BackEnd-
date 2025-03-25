@@ -1,4 +1,4 @@
-﻿require('dotenv').config();
+require('dotenv').config();
 const cors = require('cors');
 const express = require('express');
 const { exec } = require('child_process');
@@ -11,7 +11,7 @@ const bcrypt = require('bcrypt');
 const session = require('express-session');
 const app = express();
 app.use(express.json());
-
+app.use(bodyParser.urlencoded({ extended: true }));  // form data를 처리하기 위한 미들웨어
 app.use(cors());  // 모든 도메인에서 접근 허용
 // 세션 설정
 app.use(session({
@@ -25,15 +25,39 @@ const router = express.Router();
 // dialogflow
 app.use(bodyParser.urlencoded({ extended: true }));
 app.use(bodyParser.json());
+const dialogflowRouter = require('./dialogflow');  // dialogflow.js 파일 임포트
+// Dialogflow 라우터 사용
+// Dialogflow 라우터 설정
 
-app.use('/api/dialogflow', require('./dialogflow'));
+app.use('/', dialogflowRouter); 
 
-if (process.env.NODE_ENV === "production") {
-    app.use(express.static("client/build"));
-    app.get("*", (req, res) => {
-        res.sendFile(path.resolve(__dirname, "client", "build", "index.html"));
+// 정적 파일 제공 (정적 파일이 위치한 디렉토리 설정)
+// "/api" 경로는 제거하고 직접적인 build/web 디렉토리 경로를 지정합니다.
+app.use(express.static(path.resolve('E:/3/nods/frontend_new/build/web')));
+
+// 정적 파일 제공 시, 경로 확인
+app.use('/build/web', express.static(path.resolve('E:/3/nods/frontend_new/build/web'), {
+    setHeaders: (res, filePath) => {
+        if (filePath.endsWith('.js')) {
+            console.log(`Serving file: ${filePath}`); // 로그로 파일 경로 확인
+            res.setHeader('Content-Type', 'application/javascript'); // .js 파일에 대해 JS MIME 타입 설정
+        }
+    }
+}));
+// flutter_bootstrap.js 파일에 대한 명시적 처리
+app.get('/build/web/flutter_bootstrap.js', (req, res) => {
+    const filePath = path.resolve('E:/3/nods/frontend_new/build/web/flutter_bootstrap.js');
+    console.log(`Sending flutter_bootstrap.js from: ${filePath}`); // 로그로 경로 확인
+    res.setHeader('Content-Type', 'application/javascript');
+    res.sendFile(filePath, (err) => {
+        if (err) {
+            console.error("Error sending file: ", err);
+            res.status(404).send('File not found');
+        }
     });
-}
+});
+
+
 
 app.use(bodyParser.json());
 
@@ -359,30 +383,32 @@ app.get('/api/profile/:id', async (req, res) => {
 // (외부 API 또는 MongoDB에서 IT 기사를 가져오는 API)
 // 컴퓨터 소프트웨어 관련 뉴스 검색 API
 const axios = require('axios');
+//const xml2js = require('xml2js');
+const clientId = "ZjPPosVXoOeA7jp524C8";
+const clientSecret = "d4P80H8KrG";
+
 app.get('/api/news', async (req, res) => {
-    const query = '컴퓨터 소프트웨어';  // 검색할 키워드
-    const display = 10;  // 가져올 뉴스 개수 (1~100)
-    const start = 1;  // 검색 시작 위치 (1~1000)
-    const sort = 'sim';  // 정렬 방식 ('sim' - 유사도순, 'date' - 날짜순)
+    const searchKeyword = '컴퓨터 소프트웨어';
+    const encText = encodeURIComponent(searchKeyword);
+    const url = `https://openapi.naver.com/v1/search/news.json?query=${encText}&start=1&display=100`;
 
     try {
-        const response = await axios.get('https://openapi.naver.com/v1/search/news.json', {
+        const response = await axios.get(url, {
             headers: {
-                'X-Naver-Client-Id': ZjPPosVXoOeA7jp524C8,
-                'X-Naver-Client-Secret': d4P80H8KrG
-            },
-            params: {
-                query,
-                display,
-                start,
-                sort
+                'X-Naver-Client-Id': clientId,
+                'X-Naver-Client-Secret': clientSecret
             }
         });
 
-        res.json(response.data);  // 네이버 API 응답을 클라이언트에게 전달
+        // JSON 응답을 그대로 반환
+        console.log('✅ 변환된 JSON 데이터:', JSON.stringify(response.data, null, 2));
+        res.json(response.data);  // 변환된 JSON 데이터 반환
     } catch (error) {
-        console.error(error);
-        res.status(500).json({ error: 'API 호출 실패' });
+        console.error('❗ API 요청 실패:', error?.response?.data || error.message);
+        res.status(error?.response?.status || 500).json({
+            error: '뉴스 데이터를 가져오는 중 오류가 발생했습니다.',
+            details: error?.response?.data || error.message
+        });
     }
 });
 
@@ -454,7 +480,8 @@ app.get('/examples/:topic', async (req, res) => {
         res.status(500).json({ message: '서버 오류', error });
     }
 });
-
+const iconv = require('iconv-lite');
+const cheerio = require('cheerio');
 app.listen(3000, () => {
     console.log("Express server running on port 3000");
 });

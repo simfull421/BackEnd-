@@ -1,18 +1,22 @@
 require('dotenv').config();
 const express = require('express');
 const router = express.Router();
-const { SessionsClient } = require('@google-cloud/dialogflow');  // @google-cloud/dialogflow¿¡¼­ SessionsClient °¡Á®¿À±â
-const sessionClient = new SessionsClient();  // Å¬¶óÀÌ¾ğÆ® ÀÎ½ºÅÏ½º »ı¼º
+const { SessionsClient } = require('@google-cloud/dialogflow');  // @google-cloud/dialogflow SessionsClient
+const path = require('path');
 
+// ì¸ì¦ íŒŒì¼ ê²½ë¡œë¥¼ keyFilenameìœ¼ë¡œ ì„¤ì •
+const sessionClient = new SessionsClient({
+    keyFilename: 'E:\\3\\nods\\newagent-dqie-e62c103ae2aa.json'  // ì¸ì¦ íŒŒì¼ ê²½ë¡œë¥¼ ì ˆëŒ€ê²½ë¡œë¡œ ì„¤ì •
+});
 
-// .env ÆÄÀÏ¿¡¼­ È¯°æ º¯¼ö °¡Á®¿À±â
+// .envì—ì„œ í™˜ê²½ ë³€ìˆ˜ ë¡œë“œ
 const projectId = 'newagent-dqie';
 const sessionId = 'my-static-session';
-const languageCode = 'en';
+const languageCode = 'ko';
 
-// sessionPath »ı¼º (projectAgentSessionPath·Î ¼öÁ¤)
+// ì„¸ì…˜ ê²½ë¡œ ìƒì„± (projectAgentSessionPath ì‚¬ìš©)
 const sessionPath = sessionClient.projectAgentSessionPath(projectId, sessionId);
-console.log(projectId, sessionId, languageCode);  // È¯°æ º¯¼ö °ª Ãâ·Â È®ÀÎ
+console.log(projectId, sessionId, languageCode);  // ë¡œê¹… í™•ì¸
 
 // Text Query Route
 router.post('/textQuery', async (req, res) => {
@@ -20,20 +24,20 @@ router.post('/textQuery', async (req, res) => {
         session: sessionPath,
         queryInput: {
             text: {
-                text: req.body.text,  // body-parser ¸ğµâ »ç¿ë
+                text: req.body.text,  // body-parserë¡œ ë°›ì€ í…ìŠ¤íŠ¸
                 languageCode: languageCode,
             },
         },
     };
 
     try {
-        const responses = await sessionClient.detectIntent(request);  // Dialogflow API È£Ãâ
+        const responses = await sessionClient.detectIntent(request);  // Dialogflow API í˜¸ì¶œ
         console.log('Detected intent');
         const result = responses[0].queryResult;
         console.log(`Query: ${result.queryText}`);
         console.log(`Response: ${result.fulfillmentText}`);
 
-        res.send(result);  // °á°ú ÀÀ´ä
+        res.send(result);  // ì‘ë‹µ ì „ì†¡
     } catch (error) {
         console.error('Error detecting intent:', error);
         res.status(500).send('Error detecting intent');
@@ -53,15 +57,37 @@ router.post('/eventQuery', async (req, res) => {
     };
 
     try {
-        const responses = await sessionClient.detectIntent(request);  // Dialogflow API È£Ãâ
+        const responses = await sessionClient.detectIntent(request);  // Dialogflow API í˜¸ì¶œ
         console.log('Detected intent');
         const result = responses[0].queryResult;
         console.log(`Query: ${result.queryText}`);
         console.log(`Response: ${result.fulfillmentText}`);
 
-        res.send(result);  // °á°ú ÀÀ´ä
+        res.send(result);  // ì‘ë‹µ ì „ì†¡
     } catch (error) {
         console.error('Error detecting intent:', error);
+        res.status(500).send('Error detecting intent');
+    }
+});
+
+// ìƒˆë¡œ ì¶”ê°€ëœ /api/chat ê²½ë¡œ
+router.post('/chat', async (req, res) => {
+    const request = {
+        session: sessionPath,
+        queryInput: {
+            text: {
+                text: req.body.message,  // ìš”ì²­ì—ì„œ ë©”ì‹œì§€ë¥¼ ë°›ìŒ
+                languageCode: languageCode,
+            },
+        },
+    };
+
+    try {
+        const responses = await sessionClient.detectIntent(request);
+        const result = responses[0].queryResult;
+        res.json({ response: result.fulfillmentText });  // ì‘ë‹µ ë°˜í™˜
+    } catch (error) {
+        console.error('Error detecting intent:', error);  // ì—ëŸ¬ ë¡œê¹…
         res.status(500).send('Error detecting intent');
     }
 });
