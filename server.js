@@ -59,22 +59,42 @@ app.get('/build/web/flutter_bootstrap.js', (req, res) => {
 
 
 
+
 app.use(bodyParser.json());
 
-//0: 몽고 db 사용
+//0: 몽고 db 사용  03-25 추가
 
 const mongoose = require('mongoose');
+const connectDB = require('./db');
+const User = require('./models/User');
+// 데이터베이스 연결
+connectDB();
 
-const userSchema = new mongoose.Schema({
-    email: { type: String, required: true, unique: true },
-    passwordHash: { type: String, required: true },
-    name: { type: String },
-    profilePicture: { type: String },
-    bio: { type: String }
+
+// 유저 생성 예제 API
+app.post('/users', async (req, res) => {
+    const { email, password, name, profilePicture, bio } = req.body;
+
+    try {
+        // 비밀번호 해싱
+        const salt = await bcrypt.genSalt(10);  // salt 생성
+        const passwordHash = await bcrypt.hash(password, salt); // 비밀번호 해시화
+
+        const newUser = new User({
+            email,
+            passwordHash,  // 해시된 비밀번호 저장
+            password,      // 입력된 비밀번호 그대로 저장 (필요시, 사용)
+            name,
+            profilePicture,
+            bio
+        });
+
+        await newUser.save();
+        res.status(201).json({ message: '유저 생성 성공', user: newUser });
+    } catch (error) {
+        res.status(500).json({ message: '유저 생성 실패', error: error.message });
+    }
 });
-
-const User = mongoose.model('User', userSchema);
-module.exports = User;
 
 
 
@@ -211,10 +231,9 @@ app.post('/api/verify-code', (req, res) => {
     }
 });
 
-
-// **6. 회원가입 API**
+// **회원가입 API** 03-25 추가 (몽고 db 연결)
 app.post('/api/register', async (req, res) => {
-    const { email, password } = req.body;
+    const { email, password, name, profilePicture, bio } = req.body;
 
     try {
         // **이메일 중복 확인**
@@ -230,15 +249,19 @@ app.post('/api/register', async (req, res) => {
         const newUser = new User({
             email,
             passwordHash: hashedPassword, // passwordHash로 저장
+            name,
+            profilePicture,
+            bio
         });
 
         await newUser.save(); // MongoDB에 저장
-        res.status(200).json({ message: '회원가입을 성공했습니다!' });
+        res.status(201).json({ message: '회원가입을 성공했습니다!', user: newUser });
     } catch (error) {
         console.error('회원가입 오류:', error);
         res.status(500).json({ error: '회원가입에 실패했습니다.' });
     }
 });
+
 
 
 // **7. 세션 생성, 유효성, 무효화 API**  
@@ -401,7 +424,7 @@ app.get('/api/news', async (req, res) => {
         });
 
         // JSON 응답을 그대로 반환
-        console.log('✅ 변환된 JSON 데이터:', JSON.stringify(response.data, null, 2));
+        //console.log('✅ 변환된 JSON 데이터:', JSON.stringify(response.data, null, 2));
         res.json(response.data);  // 변환된 JSON 데이터 반환
     } catch (error) {
         console.error('❗ API 요청 실패:', error?.response?.data || error.message);
@@ -480,6 +503,63 @@ app.get('/examples/:topic', async (req, res) => {
         res.status(500).json({ message: '서버 오류', error });
     }
 });
+
+
+// 📌18 코드를 실행할 API (컴파일러)
+
+app.post('/run-code', (req, res) => {
+    let { code } = req.body;
+
+    // 코드에서 특수 문자를 안전하게 처리
+    const safeCode = code.replace(/(["'`$\\])/g, '\\$1'); // 특수 문자 escaping
+
+    // 템플릿 리터럴과 ${} 처리 추가 (백틱 및 중괄호 이스케이프)
+    const formattedCode = safeCode.replace(/`/g, '\\`').replace(/\${/g, '\\${').replace(/}/g, '\\}');
+
+    // 세미콜론, 중괄호를 기준으로 들여쓰기를 추가
+    let indentedCode = '';
+    let indentLevel = 0; // 들여쓰기 수준
+
+    const lines = formattedCode.split('\n');
+    lines.forEach(line => {
+        const trimmedLine = line.trim();
+
+        // '{'는 들여쓰기 레벨을 증가
+        if (trimmedLine.endsWith('{')) {
+            indentedCode += '    '.repeat(indentLevel) + trimmedLine + '\n';
+            indentLevel++; // 들여쓰기 수준 증가
+        }
+        // '}'는 들여쓰기 레벨을 감소
+        else if (trimmedLine.startsWith('}')) {
+            indentLevel--; // 들여쓰기 수준 감소
+            indentedCode += '    '.repeat(indentLevel) + trimmedLine + '\n';
+        }
+        // 세미콜론으로 끝나는 코드 라인은 현재 수준에서 출력
+        else if (trimmedLine.endsWith(';')) {
+            indentedCode += '    '.repeat(indentLevel) + trimmedLine + '\n';
+        }
+        // 그 외의 일반적인 코드 라인
+        else {
+            indentedCode += '    '.repeat(indentLevel) + trimmedLine + '\n';
+        }
+    });
+
+    // 줄 바꿈과 탭을 안전하게 처리하고 코드 내의 공백을 정상적으로 유지
+    // '\n', '\r', '\t' 등을 백슬래시로 이스케이프 처리
+    const escapedCode = indentedCode.replace(/\n/g, '\\n').replace(/\r/g, '\\r').replace(/\t/g, '\\t');
+
+    // JavaScript 코드 실행
+    // 여기서 `escapedCode`는 이스케이프된 코드로, node -e에 올바르게 전달됩니다.
+    exec(`node -e "${escapedCode.replace(/"/g, '\\"')}"`, (error, stdout, stderr) => {
+        if (error) {
+            return res.status(500).json({ output: stderr, error: error.message });
+        }
+        res.json({ output: stdout });
+    });
+});
+
+
+
 const iconv = require('iconv-lite');
 const cheerio = require('cheerio');
 app.listen(3000, () => {
