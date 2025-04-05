@@ -231,37 +231,38 @@ app.post('/api/verify-code', (req, res) => {
     }
 });
 
-// **회원가입 API** 03-25 추가 (몽고 db 연결)
+// **6. 회원가입 API** 03-25 추가 (몽고 db 연결)
 app.post('/api/register', async (req, res) => {
-    const { email, password, name, profilePicture, bio } = req.body;
+    const { email, password, name } = req.body;
 
     try {
-        // **이메일 중복 확인**
+        // 이메일 중복 확인
         const existingUser = await User.findOne({ email });
         if (existingUser) {
             return res.status(400).json({ error: '이미 사용 중인 이메일입니다.' });
         }
 
-        // **비밀번호 해시화**
+        // 비밀번호 해시화
         const hashedPassword = await bcrypt.hash(password, 10);
 
-        // **새로운 사용자 생성**
+        // 새로운 사용자 생성
         const newUser = new User({
-            email,
-            passwordHash: hashedPassword, // passwordHash로 저장
+            userID: uuidv4(), // 고유한 UUID 생성
             name,
-            profilePicture,
-            bio
+            email,
+            password: hashedPassword,
+            // createdAt은 기본값 Date.now로 자동 설정
+            // userPermission은 기본값 "일반"
         });
 
-        await newUser.save(); // MongoDB에 저장
-        res.status(201).json({ message: '회원가입을 성공했습니다!', user: newUser });
+        await newUser.save();
+
+        res.status(201).json({ message: '회원가입에 성공했습니다.', user: newUser });
     } catch (error) {
         console.error('회원가입 오류:', error);
         res.status(500).json({ error: '회원가입에 실패했습니다.' });
     }
 });
-
 
 
 // **7. 세션 생성, 유효성, 무효화 API**  
@@ -293,25 +294,25 @@ app.post('/api/find-username', async (req, res) => {
     const { email } = req.body;
 
     try {
-        // 이메일로 사용자 정보 찾기
         const user = await User.findOne({ email });
 
         if (!user) {
             return res.status(404).json({ error: '해당 이메일로 등록된 사용자가 없습니다.' });
         }
 
-        // 이메일로 아이디 전송
         const mailOptions = {
-            from: 'your-email@gmail.com',  // 보낸 사람 이메일
-            to: email,  // 받는 사람 이메일
+            from: process.env.GMAIL_USER,
+            to: email,
             subject: '아이디 찾기',
-            text: `안녕하세요, ${user.email}님의 아이디는 ${user.email}입니다.`
+            text: `안녕하세요, 회원님의 아이디는 ${user.userID}입니다.`
         };
 
         transporter.sendMail(mailOptions, (error, info) => {
             if (error) {
+                console.error('이메일 전송 오류:', error);
                 return res.status(500).json({ error: '이메일 전송 중 오류가 발생했습니다.' });
             }
+
             res.status(200).json({ message: '아이디가 이메일로 전송되었습니다.' });
         });
     } catch (error) {
@@ -322,47 +323,49 @@ app.post('/api/find-username', async (req, res) => {
 
 // **9. 비밀번호 찾기 API**
 const crypto = require('crypto');
+const generateTempPassword = () => {
+    return Math.random().toString(36).slice(-8); // 8자리 임시 비밀번호
+};
+
 app.post('/api/forgot-password', async (req, res) => {
     const { email } = req.body;
 
     try {
-        // 이메일로 사용자 찾기
         const user = await User.findOne({ email });
 
         if (!user) {
             return res.status(404).json({ error: '해당 이메일로 등록된 사용자가 없습니다.' });
         }
 
-        // 비밀번호 리셋을 위한 토큰 생성
-        const resetToken = crypto.randomBytes(20).toString('hex');
-        user.resetPasswordToken = resetToken;
-        user.resetPasswordExpires = Date.now() + 3600000;  // 1시간 후 만료
+        const tempPassword = generateTempPassword();
+        const hashedPassword = await bcrypt.hash(tempPassword, 10);
 
-        // MongoDB에 업데이트된 사용자 정보 저장
+        user.password = hashedPassword;
+        user.resetPasswordToken = undefined;
+        user.resetPasswordExpires = undefined;
+
         await user.save();
 
-        // 리셋 링크 이메일 전송
-        const resetLink = `http://localhost:3000/reset-password/${resetToken}`;
-
         const mailOptions = {
-            from: 'your-email@gmail.com',
+            from: process.env.GMAIL_USER,
             to: email,
-            subject: '비밀번호 재설정',
-            text: `안녕하세요, 비밀번호를 재설정하려면 아래 링크를 클릭하세요: \n\n ${resetLink}`
+            subject: '임시 비밀번호 발급',
+            text: `안녕하세요, 회원님의 임시 비밀번호는 "${tempPassword}"입니다.\n로그인 후 반드시 비밀번호를 변경해주세요.`
         };
 
         transporter.sendMail(mailOptions, (error, info) => {
             if (error) {
+                console.error('이메일 전송 오류:', error);
                 return res.status(500).json({ error: '이메일 전송 중 오류가 발생했습니다.' });
             }
-            res.status(200).json({ message: '비밀번호 리셋 링크가 이메일로 전송되었습니다.' });
+
+            res.status(200).json({ message: '임시 비밀번호가 이메일로 전송되었습니다.' });
         });
     } catch (error) {
         console.error('비밀번호 찾기 오류:', error);
         res.status(500).json({ error: '비밀번호 찾기 중 오류가 발생했습니다.' });
     }
 });
-
 
 
 // **10. 사용자 조회 API**  
@@ -410,10 +413,13 @@ const axios = require('axios');
 const clientId = "ZjPPosVXoOeA7jp524C8";
 const clientSecret = "d4P80H8KrG";
 
+// 관리자 ID는 로그인 세션에서 가져오는 게 이상적이지만 지금은 임시로 하드코딩
+const adminID = "admin001";
+
 app.get('/api/news', async (req, res) => {
     const searchKeyword = '컴퓨터 소프트웨어';
     const encText = encodeURIComponent(searchKeyword);
-    const url = `https://openapi.naver.com/v1/search/news.json?query=${encText}&start=1&display=100`;
+    const url = `https://openapi.naver.com/v1/search/news.json?query=${encText}&display=100&start=1`;
 
     try {
         const response = await axios.get(url, {
@@ -423,82 +429,87 @@ app.get('/api/news', async (req, res) => {
             }
         });
 
-        // JSON 응답을 그대로 반환
-        //console.log('✅ 변환된 JSON 데이터:', JSON.stringify(response.data, null, 2));
-        res.json(response.data);  // 변환된 JSON 데이터 반환
+        const items = response.data.items;
+        let savedCount = 0;
+
+        for (const item of items) {
+            // URL을 해시해서 newsID로 사용
+            const newsID = crypto.createHash('sha256').update(item.link).digest('hex');
+
+            // 중복 체크
+            const exists = await ITNews.findOne({ newsID });
+            if (exists) continue;
+
+            const newNews = new ITNews({
+                newsID,
+                adminID,
+                title: item.title.replace(/<[^>]*>?/gm, ''), // HTML 태그 제거
+                description: item.description.replace(/<[^>]*>?/gm, ''),
+                url: item.link,
+                tag: "IT", // 임시 지정. 추후 NLP 분석 등으로 자동화 가능
+            });
+
+            await newNews.save();
+            savedCount++;
+        }
+
+        res.status(200).json({ message: `${savedCount}개의 새로운 뉴스가 저장되었습니다.` });
     } catch (error) {
-        console.error('❗ API 요청 실패:', error?.response?.data || error.message);
-        res.status(error?.response?.status || 500).json({
-            error: '뉴스 데이터를 가져오는 중 오류가 발생했습니다.',
-            details: error?.response?.data || error.message
-        });
+        console.error("뉴스 저장 오류:", error?.response?.data || error.message);
+        res.status(500).json({ error: "뉴스 저장 중 오류 발생" });
     }
 });
 
 
-// 13 학습 진행도 모델
-const progressSchema = new mongoose.Schema({
-    userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
-    totalLessons: { type: Number, required: true },
-    completedLessons: { type: Number, required: true },
-    incompleteLessons: { type: Number, required: true }
-});
-const Progress = mongoose.model('Progress', progressSchema);
-
-// 14 학습 예제 모델
-const exampleSchema = new mongoose.Schema({
-    topic: { type: String, required: true },
-    examples: [{ type: String }]
-});
-const Example = mongoose.model('Example', exampleSchema);
 
 // 📌 15 학습 진행도 조회 (GET /progress/:userId)
-app.get('/progress/:userId', async (req, res) => {
+app.get('/api/learning-progress/:userID', async (req, res) => {
     try {
-        const progress = await Progress.findOne({ userId: req.params.userId });
-        if (!progress) {
-            return res.status(404).json({ message: '학습 진행도를 찾을 수 없음' });
-        }
-        res.json(progress);
+        const progresses = await LearningProgress.find({ userID: req.params.userID });
+        res.json(progresses);
     } catch (error) {
-        res.status(500).json({ message: '서버 오류', error });
+        res.status(500).json({ error: '서버 오류', detail: error.message });
     }
 });
 
-// 📌 16 학습 진행도 기록 추가 또는 갱신 (POST /progress/:userId)
-app.post('/progress/:userId', async (req, res) => {
+// 📌 16 학습 진행도 저장/갱신 (POST /progress/:userId)
+// POST /api/learning-progress
+app.post('/api/learning-progress', async (req, res) => {
+    const { progressID, userID, subUnitStatus, learningProgressStatus, completedAt } = req.body;
+
     try {
-        const { totalLessons, completedLessons, incompleteLessons } = req.body;
-        let progress = await Progress.findOne({ userId: req.params.userId });
+        let progress = await LearningProgress.findOne({ progressID });
 
         if (!progress) {
-            progress = new Progress({
-                userId: req.params.userId,
-                totalLessons,
-                completedLessons,
-                incompleteLessons
+            progress = new LearningProgress({
+                progressID,
+                userID,
+                subUnitStatus,
+                learningProgressStatus,
+                completedAt
             });
         } else {
-            progress.totalLessons = totalLessons;
-            progress.completedLessons = completedLessons;
-            progress.incompleteLessons = incompleteLessons;
+            progress.subUnitStatus = subUnitStatus;
+            progress.learningProgressStatus = learningProgressStatus;
+            progress.completedAt = completedAt;
         }
 
         await progress.save();
-        res.json({ message: '학습 진행도 저장 완료', progress });
+        res.status(200).json({ message: '학습 진행도 저장 완료', progress });
     } catch (error) {
-        res.status(500).json({ message: '서버 오류', error });
+        res.status(500).json({ error: '서버 오류', detail: error.message });
     }
 });
-
-// 📌17  학습 예제 조회 (GET /examples/:topic)
-app.get('/examples/:topic', async (req, res) => {
+// 📌  17. 학습자료 ID로 조회
+app.get('/learning-material/:id', async (req, res) => {
     try {
-        const example = await Example.findOne({ topic: req.params.topic });
-        if (!example) {
-            return res.status(404).json({ message: '해당 주제의 예제가 없음' });
+        const material = await LearningMaterial.findOne({ learningMaterialID: req.params.id });
+
+        if (!material) {
+            return res.status(404).json({ message: '해당 ID의 학습자료가 없음' });
         }
-        res.json(example);
+
+        res.json(material);
     } catch (error) {
         res.status(500).json({ message: '서버 오류', error });
     }
