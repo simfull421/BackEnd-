@@ -1,3 +1,5 @@
+// server.js 가장 위에 추가!
+process.stdout.write('\uFEFF');
 require('dotenv').config();
 const cors = require('cors');
 const express = require('express');
@@ -515,56 +517,19 @@ app.get('/learning-material/:id', async (req, res) => {
     }
 });
 
-
+const fs = require('fs');
 // 📌18 코드를 실행할 API (컴파일러)
 
 app.post('/run-code', (req, res) => {
-    let { code } = req.body;
+    const code = req.body.code;
 
-    // 코드에서 특수 문자를 안전하게 처리
-    const safeCode = code.replace(/(["'`$\\])/g, '\\$1'); // 특수 문자 escaping
+    fs.writeFileSync('temp.js', code);
 
-    // 템플릿 리터럴과 ${} 처리 추가 (백틱 및 중괄호 이스케이프)
-    const formattedCode = safeCode.replace(/`/g, '\\`').replace(/\${/g, '\\${').replace(/}/g, '\\}');
-
-    // 세미콜론, 중괄호를 기준으로 들여쓰기를 추가
-    let indentedCode = '';
-    let indentLevel = 0; // 들여쓰기 수준
-
-    const lines = formattedCode.split('\n');
-    lines.forEach(line => {
-        const trimmedLine = line.trim();
-
-        // '{'는 들여쓰기 레벨을 증가
-        if (trimmedLine.endsWith('{')) {
-            indentedCode += '    '.repeat(indentLevel) + trimmedLine + '\n';
-            indentLevel++; // 들여쓰기 수준 증가
-        }
-        // '}'는 들여쓰기 레벨을 감소
-        else if (trimmedLine.startsWith('}')) {
-            indentLevel--; // 들여쓰기 수준 감소
-            indentedCode += '    '.repeat(indentLevel) + trimmedLine + '\n';
-        }
-        // 세미콜론으로 끝나는 코드 라인은 현재 수준에서 출력
-        else if (trimmedLine.endsWith(';')) {
-            indentedCode += '    '.repeat(indentLevel) + trimmedLine + '\n';
-        }
-        // 그 외의 일반적인 코드 라인
-        else {
-            indentedCode += '    '.repeat(indentLevel) + trimmedLine + '\n';
-        }
-    });
-
-    // 줄 바꿈과 탭을 안전하게 처리하고 코드 내의 공백을 정상적으로 유지
-    // '\n', '\r', '\t' 등을 백슬래시로 이스케이프 처리
-    const escapedCode = indentedCode.replace(/\n/g, '\\n').replace(/\r/g, '\\r').replace(/\t/g, '\\t');
-
-    // JavaScript 코드 실행
-    // 여기서 `escapedCode`는 이스케이프된 코드로, node -e에 올바르게 전달됩니다.
-    exec(`node -e "${escapedCode.replace(/"/g, '\\"')}"`, (error, stdout, stderr) => {
+    exec('node temp.js', (error, stdout, stderr) => {
         if (error) {
-            return res.status(500).json({ output: stderr, error: error.message });
+            return res.status(500).json({ error: error.message, output: stderr });
         }
+
         res.json({ output: stdout });
     });
 });
